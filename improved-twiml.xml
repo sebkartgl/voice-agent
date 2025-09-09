@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say>Connecting you to our AI assistant</Say>
+  <Connect>
+    <Stream url="wss://voice-agent-550289000405.europe-west2.run.app/ws" track="both_tracks"/>
+  </Connect>
+</Response>

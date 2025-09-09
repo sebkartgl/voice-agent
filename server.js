@@ -62,8 +62,8 @@ wss.on('connection', (twilioWs) => {
           voice: 'alloy',
           input_audio_format: 'pcm16',
           output_audio_format: 'pcm16',
-          input_audio_sample_rate: 24000,
-          output_audio_sample_rate: 24000,
+          input_audio_sample_rate: 16000,
+          output_audio_sample_rate: 16000,
           input_audio_transcription: {
             model: 'whisper-1'
           }
@@ -141,8 +141,8 @@ wss.on('connection', (twilioWs) => {
           }
           twilioWs.audioFrameCount++;
           
-          // Commit every 25 frames (approximately 500ms at 20ms per frame)
-          if (twilioWs.audioFrameCount >= 25) {
+          // Commit every 20 frames (approximately 400ms at 20ms per frame)
+          if (twilioWs.audioFrameCount >= 20) {
             openaiWs.send(JSON.stringify({
               type: 'input_audio_buffer.commit'
             }));
@@ -184,46 +184,40 @@ function mulawToPcm(mulawData) {
     pcm8k.writeInt16LE(linear, i * 2);
   }
   
-  // Upsample from 8kHz to 24kHz (3x interpolation with smoothing)
+  // Upsample from 8kHz to 16kHz (2x interpolation with smoothing)
   const samplesIn = pcm8k.length / 2;
-  const pcm24k = Buffer.alloc(samplesIn * 3 * 2);
+  const pcm16k = Buffer.alloc(samplesIn * 2 * 2);
   
   for (let i = 0; i < samplesIn; i++) {
     const currentSample = pcm8k.readInt16LE(i * 2);
     const nextSample = (i + 1 < samplesIn) ? pcm8k.readInt16LE((i + 1) * 2) : currentSample;
     
-    const outputIndex = i * 3;
+    const outputIndex = i * 2;
     
     // Linear interpolation between samples
-    const step = (nextSample - currentSample) / 3;
+    const interpolatedSample = Math.round((currentSample + nextSample) / 2);
     
-    pcm24k.writeInt16LE(Math.round(currentSample), outputIndex * 2);
-    pcm24k.writeInt16LE(Math.round(currentSample + step), (outputIndex + 1) * 2);
-    pcm24k.writeInt16LE(Math.round(currentSample + step * 2), (outputIndex + 2) * 2);
+    pcm16k.writeInt16LE(currentSample, outputIndex * 2);
+    pcm16k.writeInt16LE(interpolatedSample, (outputIndex + 1) * 2);
   }
   
-  return pcm24k;
+  return pcm16k;
 }
 
 function pcmToMulaw(pcmData) {
-  // Downsample from 24kHz to 8kHz with simple averaging to reduce aliasing
+  // Downsample from 16kHz to 8kHz (take every 2nd sample with smoothing)
   const samplesIn = pcmData.length / 2;
-  const samplesOut = Math.floor(samplesIn / 3);
+  const samplesOut = Math.floor(samplesIn / 2);
   const pcm8k = Buffer.alloc(samplesOut * 2);
   
   for (let i = 0; i < samplesOut; i++) {
-    const inputIndex = i * 3;
-    let sum = 0;
-    let count = 0;
+    const inputIndex = i * 2;
     
-    // Average up to 3 samples
-    for (let j = 0; j < 3 && (inputIndex + j) < samplesIn; j++) {
-      const sample = pcmData.readInt16LE((inputIndex + j) * 2);
-      sum += sample;
-      count++;
-    }
+    // Average 2 samples for better quality
+    const sample1 = pcmData.readInt16LE(inputIndex * 2);
+    const sample2 = (inputIndex + 1 < samplesIn) ? pcmData.readInt16LE((inputIndex + 1) * 2) : sample1;
     
-    const avgSample = Math.round(sum / count);
+    const avgSample = Math.round((sample1 + sample2) / 2);
     // Clamp to 16-bit range
     const clampedSample = Math.max(-32768, Math.min(32767, avgSample));
     pcm8k.writeInt16LE(clampedSample, i * 2);
