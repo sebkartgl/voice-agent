@@ -1,0 +1,195 @@
+import 'dotenv/config';
+import express from 'express';
+import { WebSocketServer, WebSocket } from 'ws';
+
+const app = express();
+const PORT = process.env.PORT || 8080;
+
+// Health check endpoint
+app.get('/', (req, res) => {
+  res.send('Voice Agent Server Running');
+});
+
+const server = app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+
+// Twilio Media Stream WebSocket server
+const wss = new WebSocketServer({ server, path: '/ws' });
+
+wss.on('connection', (twilioWs) => {
+  console.log('Twilio Media Stream connected');
+  
+  let streamSid = null;
+  let openaiWs = null;
+  
+  // Connect to OpenAI Realtime API
+  function connectToOpenAI() {
+    const url = 'wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17';
+    
+    openaiWs = new WebSocket(url, {
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        'OpenAI-Beta': 'realtime=v1'
+      }
+    });
+
+    openaiWs.on('open', () => {
+      console.log('Connected to OpenAI Realtime API');
+      
+      // Configure the session
+      openaiWs.send(JSON.stringify({
+        type: 'session.update',
+        session: {
+          modalities: ['text', 'audio'],
+          instructions: 'You are a helpful AI assistant answering phone calls. Be concise, friendly, and professional. Ask how you can help them.',
+          voice: 'alloy',
+          input_audio_format: 'pcm16',
+          output_audio_format: 'pcm16',
+          input_audio_transcription: {
+            model: 'whisper-1'
+          }
+        }
+      }));
+    });
+
+    openaiWs.on('message', (data) => {
+      const message = JSON.parse(data.toString());
+      
+      if (message.type === 'response.audio.delta') {
+        // Convert OpenAI PCM16 to Twilio mulaw and send back
+        const audioData = Buffer.from(message.delta, 'base64');
+        const mulawData = pcmToMulaw(audioData);
+        
+        if (twilioWs.readyState === WebSocket.OPEN) {
+          twilioWs.send(JSON.stringify({
+            event: 'media',
+            streamSid: streamSid,
+            media: {
+              payload: mulawData.toString('base64')
+            }
+          }));
+        }
+      }
+      
+      if (message.type === 'session.created') {
+        console.log('OpenAI session created');
+      }
+      
+      if (message.type === 'error') {
+        console.error('OpenAI error:', message.error);
+      }
+    });
+
+    openaiWs.on('error', (error) => {
+      console.error('OpenAI WebSocket error:', error);
+    });
+
+    openaiWs.on('close', () => {
+      console.log('OpenAI connection closed');
+    });
+  }
+
+  // Handle Twilio Media Stream messages
+  twilioWs.on('message', (message) => {
+    const msg = JSON.parse(message.toString());
+    
+    switch (msg.event) {
+      case 'start':
+        streamSid = msg.start.streamSid;
+        console.log(`Stream started: ${streamSid}`);
+        connectToOpenAI();
+        break;
+        
+      case 'media':
+        if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+          // Convert Twilio mulaw to OpenAI PCM16
+          const audioData = Buffer.from(msg.media.payload, 'base64');
+          const pcmData = mulawToPcm(audioData);
+          
+          // Send to OpenAI
+          openaiWs.send(JSON.stringify({
+            type: 'input_audio_buffer.append',
+            audio: pcmData.toString('base64')
+          }));
+        }
+        break;
+        
+      case 'stop':
+        console.log(`Stream stopped: ${streamSid}`);
+        if (openaiWs) {
+          openaiWs.close();
+        }
+        break;
+    }
+  });
+
+  twilioWs.on('close', () => {
+    console.log('Twilio Media Stream disconnected');
+    if (openaiWs) {
+      openaiWs.close();
+    }
+  });
+});
+
+// Audio conversion functions
+function mulawToPcm(mulawData) {
+  const pcmData = Buffer.alloc(mulawData.length * 2);
+  
+  for (let i = 0; i < mulawData.length; i++) {
+    const mulaw = mulawData[i];
+    let linear = mulawToLinear(mulaw);
+    pcmData.writeInt16LE(linear, i * 2);
+  }
+  
+  return pcmData;
+}
+
+function pcmToMulaw(pcmData) {
+  const mulawData = Buffer.alloc(pcmData.length / 2);
+  
+  for (let i = 0; i < pcmData.length; i += 2) {
+    const linear = pcmData.readInt16LE(i);
+    const mulaw = linearToMulaw(linear);
+    mulawData[i / 2] = mulaw;
+  }
+  
+  return mulawData;
+}
+
+function mulawToLinear(mulaw) {
+  mulaw = ~mulaw;
+  const sign = mulaw & 0x80;
+  const exponent = (mulaw >> 4) & 0x07;
+  const mantissa = mulaw & 0x0F;
+  
+  let linear = (mantissa << 1) + 33;
+  linear <<= exponent + 2;
+  
+  return sign ? -linear : linear;
+}
+
+function linearToMulaw(linear) {
+  const sign = linear < 0 ? 0x80 : 0;
+  linear = Math.abs(linear);
+  
+  if (linear > 32767) linear = 32767;
+  
+  linear += 33;
+  
+  let exponent = 7;
+  for (let i = 0x4000; i > 0; i >>= 1) {
+    if (linear >= i) {
+      linear -= i;
+      break;
+    }
+    exponent--;
+  }
+  
+  const mantissa = linear >> (exponent + 3);
+  const mulaw = ~(sign | (exponent << 4) | mantissa);
+  
+  return mulaw & 0xFF;
+}
+
+console.log('Voice Agent server initialized...');

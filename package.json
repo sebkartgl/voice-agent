@@ -1,0 +1,19 @@
+{
+  "name": "voice-agent",
+  "version": "1.0.0",
+  "description": "Twilio + OpenAI Realtime Voice Agent",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "express": "^4.21.1",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
