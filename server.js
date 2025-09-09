@@ -128,11 +128,26 @@ wss.on('connection', (twilioWs) => {
             type: 'input_audio_buffer.append',
             audio: pcmData.toString('base64')
           }));
+          
+          // Periodically commit the audio buffer (every 100ms of audio)
+          if (!twilioWs.commitTimer) {
+            twilioWs.commitTimer = setInterval(() => {
+              if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+                openaiWs.send(JSON.stringify({
+                  type: 'input_audio_buffer.commit'
+                }));
+              }
+            }, 100);
+          }
         }
         break;
         
       case 'stop':
         console.log(`Stream stopped: ${streamSid}`);
+        if (twilioWs.commitTimer) {
+          clearInterval(twilioWs.commitTimer);
+          twilioWs.commitTimer = null;
+        }
         if (openaiWs) {
           openaiWs.close();
         }
@@ -146,6 +161,10 @@ wss.on('connection', (twilioWs) => {
 
   twilioWs.on('close', () => {
     console.log('Twilio Media Stream disconnected at', new Date().toISOString());
+    if (twilioWs.commitTimer) {
+      clearInterval(twilioWs.commitTimer);
+      twilioWs.commitTimer = null;
+    }
     if (openaiWs) {
       openaiWs.close();
     }
