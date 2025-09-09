@@ -60,10 +60,8 @@ wss.on('connection', (twilioWs) => {
           modalities: ['text', 'audio'],
           instructions: 'You are a helpful AI assistant answering phone calls. Be concise, friendly, and professional. Ask how you can help them.',
           voice: 'alloy',
-          input_audio_format: 'pcm16',
-          output_audio_format: 'pcm16',
-          input_audio_sample_rate: 16000,
-          output_audio_sample_rate: 16000,
+          input_audio_format: 'g711_ulaw',
+          output_audio_format: 'g711_ulaw',
           input_audio_transcription: {
             model: 'whisper-1'
           }
@@ -75,18 +73,15 @@ wss.on('connection', (twilioWs) => {
       const message = JSON.parse(data.toString());
       
       if (message.type === 'response.audio.delta') {
-        // Convert OpenAI PCM16 to Twilio mulaw and send back
-        const audioData = Buffer.from(message.delta, 'base64');
-        const mulawData = pcmToMulaw(audioData);
-        
-        console.log(`Sending ${mulawData.length} bytes mulaw to Twilio`);
+        // Send OpenAI μ-law directly to Twilio (no conversion!)
+        console.log(`Sending audio delta directly to Twilio`);
         
         if (twilioWs.readyState === WebSocket.OPEN) {
           twilioWs.send(JSON.stringify({
             event: 'media',
             streamSid: streamSid,
             media: {
-              payload: mulawData.toString('base64')
+              payload: message.delta // Send the base64 μ-law directly
             }
           }));
         }
@@ -123,16 +118,15 @@ wss.on('connection', (twilioWs) => {
         
       case 'media':
         if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-          // Convert Twilio mulaw to OpenAI PCM16
+          // Send raw μ-law data directly to OpenAI (no conversion!)
           const audioData = Buffer.from(msg.media.payload, 'base64');
-          const pcmData = mulawToPcm(audioData);
           
-          console.log(`Received ${audioData.length} bytes mulaw, converted to ${pcmData.length} bytes PCM`);
+          console.log(`Received ${audioData.length} bytes mulaw, sending directly to OpenAI`);
           
-          // Send to OpenAI
+          // Send raw μ-law to OpenAI
           openaiWs.send(JSON.stringify({
             type: 'input_audio_buffer.append',
-            audio: pcmData.toString('base64')
+            audio: msg.media.payload // Send the base64 directly
           }));
           
           // Commit after accumulating enough audio (500ms worth)
@@ -141,8 +135,8 @@ wss.on('connection', (twilioWs) => {
           }
           twilioWs.audioFrameCount++;
           
-          // Commit every 20 frames (approximately 400ms at 20ms per frame)
-          if (twilioWs.audioFrameCount >= 20) {
+          // Commit every 25 frames (approximately 500ms at 20ms per frame)
+          if (twilioWs.audioFrameCount >= 25) {
             openaiWs.send(JSON.stringify({
               type: 'input_audio_buffer.commit'
             }));
