@@ -5,9 +5,25 @@ import { WebSocketServer, WebSocket } from 'ws';
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// Enable CORS and headers for WebSocket
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  next();
+});
+
 // Health check endpoint
 app.get('/', (req, res) => {
   res.send('Voice Agent Server Running');
+});
+
+// Test endpoint for WebSocket info
+app.get('/ws-test', (req, res) => {
+  res.json({
+    message: 'WebSocket endpoint is at /ws',
+    url: `wss://${req.headers.host}/ws`,
+    status: 'ready'
+  });
 });
 
 const server = app.listen(PORT, () => {

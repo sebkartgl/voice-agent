@@ -17,7 +17,11 @@
       "Read(//d/downloads/**)",
       "Bash(gcloud run services describe:*)",
       "Bash(gcloud run services logs read:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(gcloud projects create:*)",
+      "Bash(gcloud config set:*)",
+      "Bash(gcloud services enable:*)",
+      "Bash(gcloud run services logs tail:*)"
     ],
     "deny": [],
     "ask": []

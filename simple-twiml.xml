@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say>Hello, this is a test message. If you hear this, the basic connection is working.</Say>
+  <Pause length="2"/>
+  <Say>Now attempting to connect the media stream.</Say>
+  <Connect>
+    <Stream url="wss://voice-agent-550289000405.europe-west2.run.app/ws"/>
+  </Connect>
+</Response>
