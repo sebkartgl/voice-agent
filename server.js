@@ -62,6 +62,8 @@ wss.on('connection', (twilioWs) => {
           voice: 'alloy',
           input_audio_format: 'pcm16',
           output_audio_format: 'pcm16',
+          input_audio_sample_rate: 24000,
+          output_audio_sample_rate: 24000,
           input_audio_transcription: {
             model: 'whisper-1'
           }
@@ -123,31 +125,33 @@ wss.on('connection', (twilioWs) => {
           const audioData = Buffer.from(msg.media.payload, 'base64');
           const pcmData = mulawToPcm(audioData);
           
+          console.log(`Received ${audioData.length} bytes mulaw, converted to ${pcmData.length} bytes PCM`);
+          
           // Send to OpenAI
           openaiWs.send(JSON.stringify({
             type: 'input_audio_buffer.append',
             audio: pcmData.toString('base64')
           }));
           
-          // Periodically commit the audio buffer (every 100ms of audio)
-          if (!twilioWs.commitTimer) {
-            twilioWs.commitTimer = setInterval(() => {
-              if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-                openaiWs.send(JSON.stringify({
-                  type: 'input_audio_buffer.commit'
-                }));
-              }
-            }, 100);
+          // Commit after accumulating enough audio (500ms worth)
+          if (!twilioWs.audioFrameCount) {
+            twilioWs.audioFrameCount = 0;
+          }
+          twilioWs.audioFrameCount++;
+          
+          // Commit every 25 frames (approximately 500ms at 20ms per frame)
+          if (twilioWs.audioFrameCount >= 25) {
+            openaiWs.send(JSON.stringify({
+              type: 'input_audio_buffer.commit'
+            }));
+            twilioWs.audioFrameCount = 0;
+            console.log('Committed audio buffer to OpenAI');
           }
         }
         break;
         
       case 'stop':
         console.log(`Stream stopped: ${streamSid}`);
-        if (twilioWs.commitTimer) {
-          clearInterval(twilioWs.commitTimer);
-          twilioWs.commitTimer = null;
-        }
         if (openaiWs) {
           openaiWs.close();
         }
@@ -161,10 +165,6 @@ wss.on('connection', (twilioWs) => {
 
   twilioWs.on('close', () => {
     console.log('Twilio Media Stream disconnected at', new Date().toISOString());
-    if (twilioWs.commitTimer) {
-      clearInterval(twilioWs.commitTimer);
-      twilioWs.commitTimer = null;
-    }
     if (openaiWs) {
       openaiWs.close();
     }
@@ -173,22 +173,45 @@ wss.on('connection', (twilioWs) => {
 
 // Audio conversion functions
 function mulawToPcm(mulawData) {
-  const pcmData = Buffer.alloc(mulawData.length * 2);
+  // Convert mulaw to PCM16 at 8kHz first
+  const pcm8k = Buffer.alloc(mulawData.length * 2);
   
   for (let i = 0; i < mulawData.length; i++) {
     const mulaw = mulawData[i];
     let linear = mulawToLinear(mulaw);
-    pcmData.writeInt16LE(linear, i * 2);
+    pcm8k.writeInt16LE(linear, i * 2);
   }
   
-  return pcmData;
+  // Upsample from 8kHz to 24kHz (3x interpolation)
+  const pcm24k = Buffer.alloc(pcm8k.length * 3);
+  
+  for (let i = 0; i < pcm8k.length; i += 2) {
+    const sample = pcm8k.readInt16LE(i);
+    const outputIndex = (i / 2) * 3 * 2;
+    
+    // Simple linear interpolation (repeat each sample 3 times)
+    pcm24k.writeInt16LE(sample, outputIndex);
+    pcm24k.writeInt16LE(sample, outputIndex + 2);
+    pcm24k.writeInt16LE(sample, outputIndex + 4);
+  }
+  
+  return pcm24k;
 }
 
 function pcmToMulaw(pcmData) {
-  const mulawData = Buffer.alloc(pcmData.length / 2);
+  // Downsample from 24kHz to 8kHz (take every 3rd sample)
+  const pcm8k = Buffer.alloc(pcmData.length / 3);
   
-  for (let i = 0; i < pcmData.length; i += 2) {
-    const linear = pcmData.readInt16LE(i);
+  for (let i = 0; i < pcmData.length; i += 6) { // Skip 3 samples (6 bytes) at a time
+    const sample = pcmData.readInt16LE(i);
+    pcm8k.writeInt16LE(sample, (i / 6) * 2);
+  }
+  
+  // Convert PCM16 to mulaw
+  const mulawData = Buffer.alloc(pcm8k.length / 2);
+  
+  for (let i = 0; i < pcm8k.length; i += 2) {
+    const linear = pcm8k.readInt16LE(i);
     const mulaw = linearToMulaw(linear);
     mulawData[i / 2] = mulaw;
   }
