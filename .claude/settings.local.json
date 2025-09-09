@@ -5,7 +5,19 @@
       "mcp__memory__create_entities",
       "mcp__memory__create_relations",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git remote add:*)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "Bash(gh repo create:*)",
+      "Bash(git config:*)",
+      "Bash(git remote remove:*)",
+      "Bash(gcloud run deploy:*)",
+      "Read(//d/downloads/**)",
+      "Bash(gcloud run services describe:*)",
+      "Bash(gcloud run services logs read:*)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

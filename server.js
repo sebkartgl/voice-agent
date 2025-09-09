@@ -18,7 +18,7 @@ const server = app.listen(PORT, () => {
 const wss = new WebSocketServer({ server, path: '/ws' });
 
 wss.on('connection', (twilioWs) => {
-  console.log('Twilio Media Stream connected');
+  console.log('Twilio Media Stream connected at', new Date().toISOString());
   
   let streamSid = null;
   let openaiWs = null;
@@ -35,7 +35,7 @@ wss.on('connection', (twilioWs) => {
     });
 
     openaiWs.on('open', () => {
-      console.log('Connected to OpenAI Realtime API');
+      console.log('Connected to OpenAI Realtime API at', new Date().toISOString());
       
       // Configure the session
       openaiWs.send(JSON.stringify({
@@ -82,7 +82,7 @@ wss.on('connection', (twilioWs) => {
     });
 
     openaiWs.on('error', (error) => {
-      console.error('OpenAI WebSocket error:', error);
+      console.error('OpenAI WebSocket error at', new Date().toISOString(), ':', error.message || error);
     });
 
     openaiWs.on('close', () => {
@@ -124,8 +124,12 @@ wss.on('connection', (twilioWs) => {
     }
   });
 
+  twilioWs.on('error', (error) => {
+    console.error('Twilio WebSocket error:', error.message || error);
+  });
+
   twilioWs.on('close', () => {
-    console.log('Twilio Media Stream disconnected');
+    console.log('Twilio Media Stream disconnected at', new Date().toISOString());
     if (openaiWs) {
       openaiWs.close();
     }
